@@ -1,0 +1,1533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PRISM MIRROR // Kinetic Glass & Hand Vision</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <!-- Three.js r134 for physical glass refraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #090c12;
+      color: #f8fafc;
+    }
+
+    #mirror-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 1;
+      touch-action: none;
+    }
+
+    /* Translucent 2D Hand Skeleton HUD Canvas */
+    #hud-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* Warm Apple-inspired Translucent Glass Surfaces */
+    .glass-surface {
+      background: rgba(18, 21, 28, 0.56);
+      backdrop-filter: blur(26px) saturate(180%);
+      -webkit-backdrop-filter: blur(26px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.13);
+      box-shadow:
+        0 28px 60px -15px rgba(0, 0, 0, 0.68),
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+    }
+
+    .glass-pill {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: all 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .glass-pill:hover {
+      background: rgba(255, 255, 255, 0.13);
+      border-color: rgba(255, 255, 255, 0.24);
+    }
+
+    .glass-pill.active {
+      background: rgba(255, 255, 255, 0.22);
+      border-color: rgba(255, 255, 255, 0.36);
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    }
+
+    /* Precision Optical Sliders */
+    input[type="range"].optical-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.16);
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"].optical-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(255, 255, 255, 0.25);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    input[type="range"].optical-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.18);
+      box-shadow: 0 2px 14px rgba(255, 255, 255, 0.6), 0 0 0 3px rgba(255, 255, 255, 0.35);
+    }
+
+    input[type="range"].optical-slider::-moz-range-thumb {
+      width: 15px;
+      height: 15px;
+      border: none;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+
+    #bottom-dock {
+      transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease;
+    }
+    #bottom-dock.dock-hidden {
+      transform: translateY(125%);
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hidden Webcam Video Element -->
+  <video id="webcam-video" autoplay playsinline muted class="hidden"></video>
+
+  <!-- Full-Viewport Three.js WebGL Canvas -->
+  <canvas id="mirror-canvas"></canvas>
+
+  <!-- Minimalist 2D Hand Skeleton & Pinch HUD Overlay -->
+  <canvas id="hud-canvas"></canvas>
+
+  <!-- Floating Glassmorphic UI Layer -->
+  <div class="relative z-10 pointer-events-none w-full h-full flex flex-col justify-between p-4 sm:p-6">
+
+    <!-- Top Minimalist Badge & Live Tracking Pill -->
+    <header class="flex items-start justify-between gap-3">
+      <div class="glass-surface pointer-events-auto rounded-2xl px-4 py-3 flex items-center gap-3">
+        <div class="relative flex items-center justify-center w-2.5 h-2.5 shrink-0">
+          <span id="status-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
+          <span id="status-dot" class="relative inline-flex rounded-full h-2 w-2 bg-amber-300"></span>
+        </div>
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h1 class="text-xs sm:text-sm font-semibold tracking-tight text-white">PRISM MIRROR // KINETIC GLASS</h1>
+            <span id="tracking-pill" class="text-[10px] font-medium uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-white/10 text-amber-200 border border-white/10">
+              Mouse Drag Ready
+            </span>
+          </div>
+          <p id="substatus-text" class="text-[11px] text-slate-300/80 mt-0.5 font-light">
+            Drag or scroll the glass prism directly • Or enable camera for hand vision control
+          </p>
+        </div>
+      </div>
+
+      <!-- Right Quick Controls (Hand Tracking Toggle when Camera Active + HUD Collapse) -->
+      <div class="flex items-center gap-2 pointer-events-auto">
+        <button
+          id="btn-hand-toggle"
+          type="button"
+          class="hidden glass-surface hover:bg-white/15 transition-all rounded-2xl px-3.5 py-2.5 text-xs font-medium text-cyan-200 border-cyan-400/30 cursor-pointer flex items-center gap-2"
+        >
+          <span class="w-2 h-2 rounded-full bg-cyan-400" id="hand-toggle-dot"></span>
+          <span id="hand-toggle-label">Hand Tracking: ON</span>
+        </button>
+
+        <button
+          id="btn-toggle-dock"
+          type="button"
+          title="Show/Hide Dock"
+          class="glass-surface hover:bg-white/15 transition-all rounded-2xl p-2.5 sm:p-3 text-slate-200 hover:text-white cursor-pointer"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+            <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+            <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+            <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>
+            <line x1="17" y1="16" x2="23" y2="16"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Non-Blocking Inline Notification Toast -->
+    <div id="toast-banner" class="hidden mx-auto pointer-events-auto glass-surface rounded-2xl px-4 py-2.5 text-xs text-amber-200 border-amber-400/30 max-w-md text-center shadow-xl">
+      <span id="toast-message">Camera unavailable — drag the glass prism with your mouse or touch.</span>
+    </div>
+
+    <!-- Bottom Floating Glassmorphic Dock -->
+    <div id="bottom-dock" class="w-full max-w-3xl mx-auto pointer-events-auto">
+      <div class="glass-surface rounded-3xl p-4 sm:p-5 space-y-4">
+
+        <!-- Primary Action Bar: Camera & Hand Tracking Activation + Reset Position -->
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/10">
+          <button
+            id="btn-camera"
+            type="button"
+            class="flex-1 sm:flex-initial bg-white/15 hover:bg-white/25 active:scale-[0.98] border border-white/25 transition-all rounded-2xl px-4 py-2.5 flex items-center justify-center gap-2.5 text-xs sm:text-sm font-medium text-white cursor-pointer shadow-lg"
+          >
+            <svg class="w-4 h-4 text-cyan-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+            <span id="btn-camera-label">Enable Camera &amp; Hand Tracking</span>
+          </button>
+
+          <button
+            id="btn-recenter"
+            type="button"
+            class="glass-pill rounded-2xl px-3.5 py-2.5 text-xs font-medium text-slate-200 cursor-pointer"
+          >
+            Center Prism
+          </button>
+        </div>
+
+        <!-- Selectors Row: Geometric Shape + Weather Backdrop -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          <!-- Geometric Shape Selector -->
+          <div class="space-y-1.5">
+            <span class="block text-[10px] font-medium uppercase tracking-widest text-slate-400 px-1">Geometric Prism</span>
+            <div class="grid grid-cols-4 gap-1.5" role="group" aria-label="Geometric Shape">
+              <button type="button" data-shape="icosa" class="shape-btn glass-pill active rounded-xl py-2 px-1.5 text-[11px] font-medium text-slate-200 cursor-pointer truncate">
+                Icosahedron
+              </button>
+              <button type="button" data-shape="octa" class="shape-btn glass-pill rounded-xl py-2 px-1.5 text-[11px] font-medium text-slate-200 cursor-pointer truncate">
+                Octahedron
+              </button>
+              <button type="button" data-shape="torus" class="shape-btn glass-pill rounded-xl py-2 px-1.5 text-[11px] font-medium text-slate-200 cursor-pointer truncate">
+                Torus Knot
+              </button>
+              <button type="button" data-shape="dodeca" class="shape-btn glass-pill rounded-xl py-2 px-1.5 text-[11px] font-medium text-slate-200 cursor-pointer truncate">
+                Dodecahedron
+              </button>
+            </div>
+          </div>
+
+          <!-- Weather Backdrop Selector -->
+          <div class="space-y-1.5">
+            <span class="block text-[10px] font-medium uppercase tracking-widest text-slate-400 px-1">Weather Backdrop</span>
+            <div class="grid grid-cols-3 gap-1.5" role="group" aria-label="Weather Backdrop">
+              <button type="button" data-atmo="clear" class="atmo-btn glass-pill active rounded-xl py-2 px-2 text-[11px] font-medium text-slate-200 cursor-pointer truncate">
+                Clear Prism
+              </button>
+              <button type="button" data-atmo="mist" class="atmo-btn glass-pill rounded-xl py-2 px-2 text-[11px] font-medium text-slate-200 cursor-pointer truncate">
+                Misty Rain
+              </button>
+              <button type="button" data-atmo="storm" class="atmo-btn glass-pill rounded-xl py-2 px-2 text-[11px] font-medium text-slate-200 cursor-pointer truncate">
+                Storm Glass
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sliders Row: Refraction (IOR) & Glass Frost -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1 border-t border-white/10">
+          <div class="space-y-1.5">
+            <div class="flex justify-between items-center text-xs">
+              <label for="slider-ior" class="font-medium text-slate-200">Refraction (IOR)</label>
+              <span id="val-ior" class="font-mono text-[11px] text-slate-300 tabular-nums">1.55</span>
+            </div>
+            <input
+              id="slider-ior"
+              type="range"
+              min="1.10"
+              max="2.33"
+              step="0.01"
+              value="1.55"
+              class="optical-slider"
+            />
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="flex justify-between items-center text-xs">
+              <label for="slider-frost" class="font-medium text-slate-200">Glass Frost</label>
+              <span id="val-frost" class="font-mono text-[11px] text-slate-300 tabular-nums">0.06</span>
+            </div>
+            <input
+              id="slider-frost"
+              type="range"
+              min="0.00"
+              max="0.55"
+              step="0.01"
+              value="0.06"
+              class="optical-slider"
+            />
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Module Script (Loads MediaPipe Tasks Vision ESM + Three.js Scene) -->
+  <script type="module">
+    import {
+      FilesetResolver,
+      HandLandmarker
+    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm';
+
+    /**
+     * PRISM MIRROR // KINETIC GLASS & HAND VISION
+     *
+     * Core Systems:
+     * 1. Physical Three.js Glass Refraction:
+     *    - Full-bleed opaque backdrop plane at z = -4.5 displaying either a horizontally
+     *      mirrored webcam VideoTexture or an animated procedural aurora/light-orb field.
+     *    - Central faceted 3D hero glass mesh (Icosahedron, Octahedron, Torus Knot, or Dodecahedron)
+     *      using MeshPhysicalMaterial (transmission: 1.0, thickness, ior, roughness, clearcoat)
+     *      so the mirror reflection bends authentically through every facet.
+     * 2. Direct Mouse & Touch Spring Manipulation:
+     *    - Three.js Raycaster detects hover and pointer-down on the hero glass prism, projecting
+     *      pointer coordinates onto the z = 0 interaction plane with spring-damped translation,
+     *      rotational torque from drag velocity, and scroll-wheel scaling.
+     * 3. MediaPipe HandLandmarker Computer Vision:
+     *    - Tracks 21 hand landmarks in real time on the webcam feed.
+     *    - Landmark 9 (middle finger MCP / palm center) guides the 3D glass prism across the
+     *      viewport in mirrored coordinates.
+     *    - Distance between Landmark 4 (thumb tip) and Landmark 8 (index tip) detects a Pinch
+     *      gesture, tightening spring tracking, igniting an iridescent cyan/violet rim glow,
+     *      and mapping hand twist/movement directly to 3D spin and scale.
+     */
+
+    // -------------------------------------------------------------------------
+    // 1. WEATHER ATMOSPHERE PRESETS
+    // -------------------------------------------------------------------------
+    const ATMOSPHERES = {
+      clear: {
+        tintHex: 0xffffff,
+        fogHex: 0x0b0f17,
+        fogDensity: 0.014,
+        keyHex: 0xfff5e4,
+        rimCyanHex: 0x38bdf8,
+        rimWarmHex: 0xfbbf24,
+        rimVioletHex: 0xc084fc,
+        wireHex: 0xffffff,
+        wireOpacity: 0.22,
+        particleMode: 'motes',
+        particleHex: 0xfde68a,
+        particleOpacity: 0.55,
+        particleSpeed: 1.4,
+        defaultIor: 1.55,
+        defaultFrost: 0.06,
+        orbPalette: ['#17153b', '#2e1065', '#f59e0b', '#38bdf8', '#ec4899']
+      },
+      mist: {
+        tintHex: 0xdbeafe,
+        fogHex: 0x0f1922,
+        fogDensity: 0.032,
+        keyHex: 0xe0f2fe,
+        rimCyanHex: 0x2dd4bf,
+        rimWarmHex: 0x93c5fd,
+        rimVioletHex: 0x818cf8,
+        wireHex: 0x99f6e4,
+        wireOpacity: 0.28,
+        particleMode: 'drizzle',
+        particleHex: 0xbae6fd,
+        particleOpacity: 0.50,
+        particleSpeed: 11.5,
+        defaultIor: 1.42,
+        defaultFrost: 0.22,
+        orbPalette: ['#0f172a', '#134e4a', '#2dd4bf', '#60a5fa', '#a7f3d0']
+      },
+      storm: {
+        tintHex: 0x94a3b8,
+        fogHex: 0x070a10,
+        fogDensity: 0.044,
+        keyHex: 0xcbd5e1,
+        rimCyanHex: 0x06b6d4,
+        rimWarmHex: 0x6366f1,
+        rimVioletHex: 0xa855f7,
+        wireHex: 0x67e8f9,
+        wireOpacity: 0.36,
+        particleMode: 'storm',
+        particleHex: 0x7dd3fc,
+        particleOpacity: 0.68,
+        particleSpeed: 26.0,
+        defaultIor: 1.88,
+        defaultFrost: 0.14,
+        orbPalette: ['#090d16', '#1e293b', '#0284c7', '#4f46e5', '#22d3ee']
+      }
+    };
+
+    // -------------------------------------------------------------------------
+    // 2. APPLICATION & KINETIC PHYSICS STATE
+    // -------------------------------------------------------------------------
+    const state = {
+      atmoKey: 'clear',
+      shapeKey: 'icosa',
+      cameraActive: false,
+      handTrackingEnabled: true,
+      handModelReady: false,
+      handDetected: false,
+      isPinching: false,
+      isHovered: false,
+      isMouseDragging: false,
+
+      // Optical uniforms
+      ior: 1.55,
+      frost: 0.06,
+      targetIor: 1.55,
+      targetFrost: 0.06,
+
+      // Colors & Lighting
+      tintColor: new THREE.Color(0xffffff),
+      targetTintColor: new THREE.Color(0xffffff),
+      fogColor: new THREE.Color(0x0b0f17),
+      targetFogColor: new THREE.Color(0x0b0f17),
+      fogDensity: 0.014,
+      targetFogDensity: 0.014,
+      keyColor: new THREE.Color(0xfff5e4),
+      targetKeyColor: new THREE.Color(0xfff5e4),
+      rimCyan: new THREE.Color(0x38bdf8),
+      targetRimCyan: new THREE.Color(0x38bdf8),
+      rimWarm: new THREE.Color(0xfbbf24),
+      targetRimWarm: new THREE.Color(0xfbbf24),
+      rimViolet: new THREE.Color(0xc084fc),
+      targetRimViolet: new THREE.Color(0xc084fc),
+      wireColor: new THREE.Color(0xffffff),
+      targetWireColor: new THREE.Color(0xffffff),
+      wireOpacity: 0.22,
+      targetWireOpacity: 0.22,
+      particleColor: new THREE.Color(0xfde68a),
+      targetParticleColor: new THREE.Color(0xfde68a),
+      particleOpacity: 0.55,
+      targetParticleOpacity: 0.55,
+      particleSpeed: 1.4,
+      targetParticleSpeed: 1.4,
+      particleMode: 'motes',
+
+      // Hero Glass Prism 3D Spring Kinematics
+      prismPos: new THREE.Vector3(0, 0.15, 0),
+      prismTargetPos: new THREE.Vector3(0, 0.15, 0),
+      prismVel: new THREE.Vector3(0, 0, 0),
+      prismScale: 1.0,
+      prismTargetScale: 1.0,
+      rotVel: new THREE.Vector2(0.18, 0.32), // (pitchVel, yawVel)
+      grabGlow: 0.0,
+
+      // Hand Landmarks (mirrored normalized [0..1] screen coordinates)
+      latestLandmarks: null,
+      pinchCenterNorm: { x: 0.5, y: 0.5 },
+      prevHandWorld: new THREE.Vector3(0, 0.15, 0),
+      prevHandAngle: 0,
+      hasPrevHandSample: false
+    };
+
+    // -------------------------------------------------------------------------
+    // 3. THREE.JS RENDERER, SCENE & CAMERA
+    // -------------------------------------------------------------------------
+    const canvas = document.getElementById('mirror-canvas');
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.14;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+
+    const scene = new THREE.Scene();
+    scene.background = state.fogColor;
+    scene.fog = new THREE.FogExp2(state.fogColor.getHex(), state.fogDensity);
+
+    const camera = new THREE.PerspectiveCamera(
+      42,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      100
+    );
+    camera.position.set(0, 0, 8.8);
+
+    // -------------------------------------------------------------------------
+    // 4. PROCEDURAL AURORA/LIGHT-ORB MIRROR & WEBCAM VIDEO TEXTURE
+    // -------------------------------------------------------------------------
+    const procCanvas = document.createElement('canvas');
+    procCanvas.width = 512;
+    procCanvas.height = 512;
+    const procCtx = procCanvas.getContext('2d');
+
+    const proceduralTexture = new THREE.CanvasTexture(procCanvas);
+    proceduralTexture.encoding = THREE.sRGBEncoding;
+    proceduralTexture.minFilter = THREE.LinearFilter;
+    proceduralTexture.magFilter = THREE.LinearFilter;
+
+    const lightOrbs = [
+      { vx: 0.22, vy: 0.17, r: 0.44, colorIdx: 2 },
+      { vx: -0.19, vy: 0.21, r: 0.48, colorIdx: 3 },
+      { vx: 0.15, vy: -0.24, r: 0.38, colorIdx: 4 },
+      { vx: -0.21, vy: -0.16, r: 0.42, colorIdx: 2 }
+    ];
+
+    function updateProceduralMirror(elapsed) {
+      const palette = ATMOSPHERES[state.atmoKey].orbPalette;
+      const w = procCanvas.width;
+      const h = procCanvas.height;
+
+      const baseGrad = procCtx.createLinearGradient(0, 0, w, h);
+      baseGrad.addColorStop(0, palette[0]);
+      baseGrad.addColorStop(1, palette[1]);
+      procCtx.globalCompositeOperation = 'source-over';
+      procCtx.fillStyle = baseGrad;
+      procCtx.fillRect(0, 0, w, h);
+
+      procCtx.globalCompositeOperation = 'screen';
+      for (let i = 0; i < lightOrbs.length; i++) {
+        const orb = lightOrbs[i];
+        const cx = (0.5 + 0.36 * Math.sin(elapsed * orb.vx + i * 1.7)) * w;
+        const cy = (0.5 + 0.36 * Math.cos(elapsed * orb.vy + i * 2.3)) * h;
+        const radius = orb.r * w;
+
+        const grad = procCtx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        grad.addColorStop(0, palette[orb.colorIdx]);
+        grad.addColorStop(0.45, palette[orb.colorIdx] + '66');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+        procCtx.fillStyle = grad;
+        procCtx.beginPath();
+        procCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+        procCtx.fill();
+      }
+
+      // Subtle architectural grid lines to accentuate real-time glass lensing
+      procCtx.globalCompositeOperation = 'lighter';
+      procCtx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      procCtx.lineWidth = 1.5;
+      const step = 64;
+      const offset = (elapsed * 14) % step;
+      for (let x = offset; x < w; x += step) {
+        procCtx.beginPath();
+        procCtx.moveTo(x, 0);
+        procCtx.lineTo(x, h);
+        procCtx.stroke();
+      }
+      for (let y = offset; y < h; y += step) {
+        procCtx.beginPath();
+        procCtx.moveTo(0, y);
+        procCtx.lineTo(w, y);
+        procCtx.stroke();
+      }
+
+      proceduralTexture.needsUpdate = true;
+    }
+
+    // Full-bleed Mirror Backdrop Plane (opaque so Three.js physical transmission refracts it)
+    const mirrorPlaneZ = -4.5;
+    const mirrorGeo = new THREE.PlaneGeometry(1, 1);
+    const mirrorMat = new THREE.MeshBasicMaterial({
+      map: proceduralTexture,
+      color: state.tintColor,
+      depthWrite: true
+    });
+    const mirrorMesh = new THREE.Mesh(mirrorGeo, mirrorMat);
+    mirrorMesh.position.set(0, 0, mirrorPlaneZ);
+    scene.add(mirrorMesh);
+
+    let videoAspect = 16 / 9;
+    function getFrustumSizeAtZ(targetZ) {
+      const dist = camera.position.z - targetZ;
+      const vFov = THREE.MathUtils.degToRad(camera.fov);
+      const height = 2 * Math.tan(vFov / 2) * dist;
+      const width = height * camera.aspect;
+      return { width, height };
+    }
+
+    function fitMirrorPlane() {
+      const view = getFrustumSizeAtZ(mirrorPlaneZ);
+      let planeW = view.width;
+      let planeH = view.height;
+
+      if (state.cameraActive) {
+        if (camera.aspect > videoAspect) {
+          planeW = view.width;
+          planeH = view.width / videoAspect;
+        } else {
+          planeH = view.height;
+          planeW = view.height * videoAspect;
+        }
+      }
+      mirrorMesh.scale.set(planeW * 1.04, planeH * 1.04, 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. STUDIO & DISPERSION LIGHTING RIG
+    // -------------------------------------------------------------------------
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+    scene.add(ambientLight);
+
+    const keyLight = new THREE.DirectionalLight(state.keyColor.getHex(), 1.9);
+    keyLight.position.set(4, 6, 7);
+    scene.add(keyLight);
+
+    const cyanRimLight = new THREE.PointLight(state.rimCyan.getHex(), 3.2, 20);
+    cyanRimLight.position.set(-4.2, 2.4, 2.6);
+    scene.add(cyanRimLight);
+
+    const warmRimLight = new THREE.PointLight(state.rimWarm.getHex(), 3.0, 20);
+    warmRimLight.position.set(4.2, -2.0, 2.6);
+    scene.add(warmRimLight);
+
+    const violetRimLight = new THREE.PointLight(state.rimViolet.getHex(), 2.6, 18);
+    violetRimLight.position.set(0, 4.0, -1.2);
+    scene.add(violetRimLight);
+
+    // -------------------------------------------------------------------------
+    // 6. HERO INTERACTIVE 3D GLASS PRISM & ORBITING SHARDS
+    // -------------------------------------------------------------------------
+    const heroGlassMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      metalness: 0.0,
+      roughness: state.frost,
+      transmission: 1.0,
+      thickness: 2.4,
+      ior: state.ior,
+      reflectivity: 0.96,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.05,
+      attenuationColor: new THREE.Color(0xf8fafc),
+      attenuationDistance: 6.0,
+      flatShading: true
+    });
+
+    const heroWireMaterial = new THREE.LineBasicMaterial({
+      color: state.wireColor,
+      transparent: true,
+      opacity: state.wireOpacity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    // Hero Prism Group (Directly movable via Mouse/Touch Drag AND Hand Vision)
+    const heroGroup = new THREE.Group();
+    heroGroup.position.copy(state.prismPos);
+    scene.add(heroGroup);
+
+    // Geometries dictionary for instant switching
+    const SHAPES = {
+      icosa: new THREE.IcosahedronGeometry(1.42, 0),
+      octa: new THREE.OctahedronGeometry(1.52, 0),
+      torus: new THREE.TorusKnotGeometry(1.02, 0.34, 72, 10, 2, 3),
+      dodeca: new THREE.DodecahedronGeometry(1.42, 0)
+    };
+
+    const heroMesh = new THREE.Mesh(SHAPES.icosa, heroGlassMaterial);
+    heroGroup.add(heroMesh);
+
+    let heroWire = new THREE.LineSegments(
+      new THREE.EdgesGeometry(SHAPES.icosa, 12),
+      heroWireMaterial
+    );
+    heroWire.scale.setScalar(1.004);
+    heroGroup.add(heroWire);
+
+    function setHeroShape(key) {
+      if (!SHAPES[key]) return;
+      state.shapeKey = key;
+      heroMesh.geometry = SHAPES[key];
+
+      heroGroup.remove(heroWire);
+      heroWire.geometry.dispose();
+      heroWire = new THREE.LineSegments(
+        new THREE.EdgesGeometry(SHAPES[key], 12),
+        heroWireMaterial
+      );
+      heroWire.scale.setScalar(1.004);
+      heroGroup.add(heroWire);
+    }
+
+    // Orbiting Companion Glass Shards (react organically to the hero prism's position)
+    const shardMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      metalness: 0.0,
+      roughness: 0.1,
+      transmission: 1.0,
+      thickness: 1.4,
+      ior: 1.65,
+      reflectivity: 0.9,
+      clearcoat: 1.0,
+      flatShading: true
+    });
+
+    const shards = [];
+    const shardSpecs = [
+      { geo: new THREE.OctahedronGeometry(0.42, 0), radius: 2.65, speed: 0.55, phase: 0.4, yAmp: 0.55 },
+      { geo: new THREE.TetrahedronGeometry(0.46, 0), radius: 2.95, speed: -0.42, phase: 2.5, yAmp: 0.65 },
+      { geo: new THREE.DodecahedronGeometry(0.36, 0), radius: 2.45, speed: 0.48, phase: 4.3, yAmp: 0.48 }
+    ];
+
+    shardSpecs.forEach((spec) => {
+      const g = new THREE.Group();
+      const m = new THREE.Mesh(spec.geo, shardMaterial);
+      const w = new THREE.LineSegments(new THREE.EdgesGeometry(spec.geo, 12), heroWireMaterial);
+      w.scale.setScalar(1.005);
+      g.add(m);
+      g.add(w);
+      scene.add(g);
+      shards.push({ group: g, spec });
+    });
+
+    // -------------------------------------------------------------------------
+    // 7. 3D ATMOSPHERIC WEATHER PARTICLES (PRISM MOTES & RAIN STREAKS)
+    // -------------------------------------------------------------------------
+    const PARTICLE_COUNT = 620;
+    const P_BOUNDS = { x: 8.5, y: 6.5, zMin: -3.8, zMax: 2.2 };
+    const pPositions = new Float32Array(PARTICLE_COUNT * 2 * 3);
+    const pData = [];
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const x = (Math.random() - 0.5) * P_BOUNDS.x * 2;
+      const y = (Math.random() - 0.5) * P_BOUNDS.y * 2;
+      const z = P_BOUNDS.zMin + Math.random() * (P_BOUNDS.zMax - P_BOUNDS.zMin);
+      const speed = 0.7 + Math.random() * 0.7;
+      const phase = Math.random() * Math.PI * 2;
+      pData.push({ x, y, z, speed, phase });
+
+      const idx = i * 6;
+      pPositions[idx] = x;
+      pPositions[idx + 1] = y;
+      pPositions[idx + 2] = z;
+      pPositions[idx + 3] = x;
+      pPositions[idx + 4] = y - 0.05;
+      pPositions[idx + 5] = z;
+    }
+
+    const particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+    const particleMat = new THREE.LineBasicMaterial({
+      color: state.particleColor,
+      transparent: true,
+      opacity: state.particleOpacity,
+      depthWrite: true
+    });
+    const particleSystem = new THREE.LineSegments(particleGeo, particleMat);
+    scene.add(particleSystem);
+
+    // -------------------------------------------------------------------------
+    // 8. DIRECT MOUSE & TOUCH RAYCAST DRAG + SCROLL SCALE
+    // -------------------------------------------------------------------------
+    const raycaster = new THREE.Raycaster();
+    const pointerNdc = new THREE.Vector2();
+    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // z = 0 plane
+    const dragIntersect = new THREE.Vector3();
+    const dragOffset = new THREE.Vector3();
+    let prevDragPoint = new THREE.Vector3();
+
+    function updatePointerNdc(clientX, clientY) {
+      pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
+      pointerNdc.y = -(clientY / window.innerHeight) * 2 + 1;
+    }
+
+    function clampToViewport(vec3) {
+      const view = getFrustumSizeAtZ(0);
+      const maxX = Math.max(1.2, view.width * 0.42);
+      const maxY = Math.max(1.0, view.height * 0.38);
+      vec3.x = THREE.MathUtils.clamp(vec3.x, -maxX, maxX);
+      vec3.y = THREE.MathUtils.clamp(vec3.y, -maxY, maxY);
+      return vec3;
+    }
+
+    function onPointerDown(clientX, clientY) {
+      updatePointerNdc(clientX, clientY);
+      raycaster.setFromCamera(pointerNdc, camera);
+      const hits = raycaster.intersectObject(heroMesh, false);
+
+      if (hits.length > 0) {
+        state.isMouseDragging = true;
+        canvas.style.cursor = 'grabbing';
+        if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
+          dragOffset.copy(heroGroup.position).sub(dragIntersect);
+          prevDragPoint.copy(dragIntersect);
+        }
+      }
+    }
+
+    function onPointerMove(clientX, clientY) {
+      updatePointerNdc(clientX, clientY);
+      raycaster.setFromCamera(pointerNdc, camera);
+
+      if (state.isMouseDragging) {
+        if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
+          const nextTarget = dragIntersect.clone().add(dragOffset);
+          clampToViewport(nextTarget);
+          state.prismTargetPos.copy(nextTarget);
+
+          // Impart organic rotational torque from drag motion
+          const dx = dragIntersect.x - prevDragPoint.x;
+          const dy = dragIntersect.y - prevDragPoint.y;
+          state.rotVel.y += dx * 2.4;
+          state.rotVel.x -= dy * 2.4;
+          prevDragPoint.copy(dragIntersect);
+        }
+        return;
+      }
+
+      // Hover detection when not dragging
+      const hits = raycaster.intersectObject(heroMesh, false);
+      const hovered = hits.length > 0;
+      if (hovered !== state.isHovered) {
+        state.isHovered = hovered;
+        canvas.style.cursor = hovered ? 'grab' : 'default';
+      }
+    }
+
+    function onPointerUp() {
+      if (state.isMouseDragging) {
+        state.isMouseDragging = false;
+        canvas.style.cursor = state.isHovered ? 'grab' : 'default';
+      }
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) onPointerDown(e.clientX, e.clientY);
+    });
+    window.addEventListener('mousemove', (e) => onPointerMove(e.clientX, e.clientY), { passive: true });
+    window.addEventListener('mouseup', onPointerUp);
+
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches && e.touches.length > 0) {
+        onPointerDown(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches && e.touches.length > 0) {
+        onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+    window.addEventListener('touchend', onPointerUp);
+
+    // Scroll wheel smoothly scales the hero glass prism
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = -Math.sign(e.deltaY) * 0.08;
+      state.prismTargetScale = THREE.MathUtils.clamp(state.prismTargetScale + delta, 0.55, 1.75);
+    }, { passive: false });
+
+    // -------------------------------------------------------------------------
+    // 9. MEDIAPIPE HANDLANDMARKER (COMPUTER VISION) + WEBCAM MIRROR
+    // -------------------------------------------------------------------------
+    const videoEl = document.getElementById('webcam-video');
+    const btnCamera = document.getElementById('btn-camera');
+    const btnCameraLabel = document.getElementById('btn-camera-label');
+    const btnHandToggle = document.getElementById('btn-hand-toggle');
+    const handToggleLabel = document.getElementById('hand-toggle-label');
+    const handToggleDot = document.getElementById('hand-toggle-dot');
+    const trackingPill = document.getElementById('tracking-pill');
+    const substatusText = document.getElementById('substatus-text');
+    const statusDot = document.getElementById('status-dot');
+    const statusPing = document.getElementById('status-ping');
+    const toastBanner = document.getElementById('toast-banner');
+    const toastMessage = document.getElementById('toast-message');
+
+    let handLandmarker = null;
+    let activeStream = null;
+    let videoTexture = null;
+    let lastVideoTime = -1;
+    let toastTimer = null;
+
+    function showToast(msg) {
+      toastMessage.textContent = msg;
+      toastBanner.classList.remove('hidden');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toastBanner.classList.add('hidden');
+      }, 4800);
+    }
+
+    function setTrackingBadge(mode) {
+      if (mode === 'loading') {
+        trackingPill.textContent = 'Loading Hand Vision...';
+        trackingPill.className = 'text-[10px] font-medium uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-200 border border-cyan-400/30';
+        statusDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-cyan-400';
+        statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75';
+      } else if (mode === 'pinched') {
+        trackingPill.textContent = 'Hand Tracked: Pinched';
+        trackingPill.className = 'text-[10px] font-medium uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-fuchsia-500/25 text-fuchsia-200 border border-fuchsia-400/40';
+        statusDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-fuchsia-400';
+        statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-fuchsia-400 opacity-75';
+      } else if (mode === 'open') {
+        trackingPill.textContent = 'Hand Tracked: Open';
+        trackingPill.className = 'text-[10px] font-medium uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-emerald-500/25 text-emerald-200 border border-emerald-400/40';
+        statusDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-emerald-400';
+        statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75';
+      } else if (mode === 'searching') {
+        trackingPill.textContent = 'Show Hand to Mirror';
+        trackingPill.className = 'text-[10px] font-medium uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/25';
+        statusDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-cyan-300';
+        statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-300 opacity-75';
+      } else {
+        trackingPill.textContent = 'Mouse Drag Ready';
+        trackingPill.className = 'text-[10px] font-medium uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-white/10 text-amber-200 border border-white/10';
+        statusDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-amber-300';
+        statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75';
+      }
+    }
+
+    async function initMediaPipeHandLandmarker() {
+      if (handLandmarker) return handLandmarker;
+
+      setTrackingBadge('loading');
+      substatusText.textContent = 'Initializing MediaPipe HandLandmarker vision model...';
+
+      const vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+      );
+
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+          delegate: 'GPU'
+        },
+        runningMode: 'VIDEO',
+        numHands: 1,
+        minHandDetectionConfidence: 0.55,
+        minHandPresenceConfidence: 0.55,
+        minTrackingConfidence: 0.55
+      });
+
+      state.handModelReady = true;
+      return handLandmarker;
+    }
+
+    async function toggleCameraAndVision() {
+      // Turn OFF if already active
+      if (state.cameraActive) {
+        if (activeStream) {
+          activeStream.getTracks().forEach((t) => t.stop());
+          activeStream = null;
+        }
+        videoEl.srcObject = null;
+        if (videoTexture) {
+          videoTexture.dispose();
+          videoTexture = null;
+        }
+
+        state.cameraActive = false;
+        state.handDetected = false;
+        state.isPinching = false;
+        state.latestLandmarks = null;
+        state.hasPrevHandSample = false;
+
+        mirrorMat.map = proceduralTexture;
+        mirrorMat.needsUpdate = true;
+        fitMirrorPlane();
+
+        btnCameraLabel.textContent = 'Enable Camera & Hand Tracking';
+        btnHandToggle.classList.add('hidden');
+        setTrackingBadge('idle');
+        substatusText.textContent = 'Drag or scroll the glass prism directly • Or enable camera for hand vision control';
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('Webcam API unavailable in this browser — mouse/touch dragging remains active.');
+        return;
+      }
+
+      btnCameraLabel.textContent = 'Starting Mirror & Vision...';
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        activeStream = stream;
+        videoEl.srcObject = stream;
+        await videoEl.play();
+
+        videoAspect = (videoEl.videoWidth && videoEl.videoHeight)
+          ? (videoEl.videoWidth / videoEl.videoHeight)
+          : (16 / 9);
+
+        // Horizontally mirrored VideoTexture so moving left/right matches a true mirror
+        videoTexture = new THREE.VideoTexture(videoEl);
+        videoTexture.encoding = THREE.sRGBEncoding;
+        videoTexture.minFilter = THREE.LinearFilter;
+        videoTexture.magFilter = THREE.LinearFilter;
+        videoTexture.wrapS = THREE.RepeatWrapping;
+        videoTexture.repeat.x = -1;
+        videoTexture.offset.x = 1;
+
+        state.cameraActive = true;
+        mirrorMat.map = videoTexture;
+        mirrorMat.needsUpdate = true;
+        fitMirrorPlane();
+
+        btnCameraLabel.textContent = 'Disable Camera';
+        btnHandToggle.classList.remove('hidden');
+
+        // Load MediaPipe HandLandmarker model
+        try {
+          await initMediaPipeHandLandmarker();
+          if (state.handTrackingEnabled) {
+            setTrackingBadge('searching');
+            substatusText.textContent = 'Raise an open hand to glide the prism • Pinch thumb & index to grab and spin';
+          } else {
+            setTrackingBadge('idle');
+            substatusText.textContent = 'Mirror active (Hand tracking paused) • Drag prism with mouse';
+          }
+        } catch (cvErr) {
+          showToast('Mirror active, but hand vision model failed to load (network/WASM). Mouse drag still works.');
+          setTrackingBadge('idle');
+        }
+      } catch (camErr) {
+        btnCameraLabel.textContent = 'Enable Camera & Hand Tracking';
+        showToast('Camera permission declined or unavailable — drag the glass prism with your mouse.');
+      }
+    }
+
+    btnCamera.addEventListener('click', toggleCameraAndVision);
+
+    btnHandToggle.addEventListener('click', () => {
+      state.handTrackingEnabled = !state.handTrackingEnabled;
+      if (state.handTrackingEnabled) {
+        handToggleLabel.textContent = 'Hand Tracking: ON';
+        handToggleDot.className = 'w-2 h-2 rounded-full bg-cyan-400';
+        setTrackingBadge('searching');
+        substatusText.textContent = 'Raise an open hand to glide the prism • Pinch thumb & index to grab and spin';
+      } else {
+        state.handDetected = false;
+        state.isPinching = false;
+        state.latestLandmarks = null;
+        state.hasPrevHandSample = false;
+        handToggleLabel.textContent = 'Hand Tracking: OFF';
+        handToggleDot.className = 'w-2 h-2 rounded-full bg-slate-500';
+        setTrackingBadge('idle');
+        substatusText.textContent = 'Hand tracking paused • Drag or scroll the prism with your mouse';
+      }
+    });
+
+    // Map normalized video landmark (x, y) into mirrored 3D world coordinates on z = 0
+    function videoNormToMirroredWorld(normX, normY) {
+      // Account for object-fit: cover cropping of the video backdrop plane
+      const view = getFrustumSizeAtZ(0);
+      let scaleX = 1;
+      let scaleY = 1;
+      if (camera.aspect > videoAspect) {
+        scaleY = camera.aspect / videoAspect;
+      } else {
+        scaleX = videoAspect / camera.aspect;
+      }
+
+      // Mirror X horizontally: 1 - normX
+      const mirroredX = 1.0 - normX;
+      const ndcX = ((mirroredX - 0.5) * scaleX) * 2.0;
+      const ndcY = -((normY - 0.5) * scaleY) * 2.0;
+
+      const worldVec = new THREE.Vector3(
+        ndcX * (view.width * 0.5),
+        ndcY * (view.height * 0.5),
+        0
+      );
+      return clampToViewport(worldVec);
+    }
+
+    function processHandVision(nowMs) {
+      if (
+        !state.cameraActive ||
+        !state.handTrackingEnabled ||
+        !state.handModelReady ||
+        !handLandmarker ||
+        videoEl.readyState < 2
+      ) {
+        return;
+      }
+
+      if (videoEl.currentTime === lastVideoTime) return;
+      lastVideoTime = videoEl.currentTime;
+
+      const results = handLandmarker.detectForVideo(videoEl, nowMs);
+
+      if (results && results.landmarks && results.landmarks.length > 0) {
+        const landmarks = results.landmarks[0];
+        state.latestLandmarks = landmarks;
+
+        // Key landmarks: 0 = Wrist, 4 = Thumb Tip, 8 = Index Tip, 9 = Middle Finger MCP (Palm Center)
+        const wrist = landmarks[0];
+        const thumbTip = landmarks[4];
+        const indexTip = landmarks[8];
+        const palmCenter = landmarks[9];
+
+        // Normalize pinch distance by hand size (wrist to middle MCP) so distance from camera doesn't skew pinch
+        const handScale = Math.max(
+          0.04,
+          Math.hypot(palmCenter.x - wrist.x, palmCenter.y - wrist.y)
+        );
+        const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+        const normalizedPinch = pinchDist / handScale;
+
+        // Hysteresis prevents flickering at the pinch threshold
+        const wasPinching = state.isPinching;
+        state.isPinching = wasPinching ? (normalizedPinch < 0.42) : (normalizedPinch < 0.32);
+
+        // Track either midpoint of pinch (when pinched) or palm center (when open)
+        const trackNormX = state.isPinching ? (thumbTip.x + indexTip.x) * 0.5 : palmCenter.x;
+        const trackNormY = state.isPinching ? (thumbTip.y + indexTip.y) * 0.5 : palmCenter.y;
+
+        state.pinchCenterNorm.x = 1.0 - trackNormX;
+        state.pinchCenterNorm.y = trackNormY;
+
+        const targetWorld = videoNormToMirroredWorld(trackNormX, trackNormY);
+
+        // Compute hand roll angle (wrist -> palmCenter) for rotational twisting
+        const handAngle = Math.atan2(
+          palmCenter.y - wrist.y,
+          (1.0 - palmCenter.x) - (1.0 - wrist.x)
+        );
+
+        if (!state.isMouseDragging) {
+          state.prismTargetPos.copy(targetWorld);
+
+          if (state.hasPrevHandSample) {
+            const dx = targetWorld.x - state.prevHandWorld.x;
+            const dy = targetWorld.y - state.prevHandWorld.y;
+            let dAngle = handAngle - state.prevHandAngle;
+            if (dAngle > Math.PI) dAngle -= Math.PI * 2;
+            if (dAngle < -Math.PI) dAngle += Math.PI * 2;
+
+            if (state.isPinching) {
+              // Pinched grab: direct responsive spin & wrist-twist torque
+              state.rotVel.y += dx * 3.8 + dAngle * 4.5;
+              state.rotVel.x -= dy * 3.8;
+            } else {
+              // Open hand glide: gentle aerodynamic rotational drift
+              state.rotVel.y += dx * 1.4;
+              state.rotVel.x -= dy * 1.4;
+            }
+          }
+        }
+
+        state.prevHandWorld.copy(targetWorld);
+        state.prevHandAngle = handAngle;
+        state.hasPrevHandSample = true;
+
+        if (!state.handDetected || wasPinching !== state.isPinching) {
+          state.handDetected = true;
+          setTrackingBadge(state.isPinching ? 'pinched' : 'open');
+        }
+      } else {
+        if (state.handDetected) {
+          state.handDetected = false;
+          state.isPinching = false;
+          state.latestLandmarks = null;
+          state.hasPrevHandSample = false;
+          setTrackingBadge('searching');
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 10. SLEEK 2D TRANSLUCENT GEOMETRIC HAND-SKELETON HUD OVERLAY
+    // -------------------------------------------------------------------------
+    const hudCanvas = document.getElementById('hud-canvas');
+    const hudCtx = hudCanvas.getContext('2d');
+
+    const HAND_CONNECTIONS = [
+      [0, 1], [1, 2], [2, 3], [3, 4],       // Thumb
+      [0, 5], [5, 6], [6, 7], [7, 8],       // Index
+      [5, 9], [9, 10], [10, 11], [11, 12],  // Middle
+      [9, 13], [13, 14], [14, 15], [15, 16],// Ring
+      [13, 17], [17, 18], [18, 19], [19, 20],// Pinky
+      [0, 17]                                // Palm base
+    ];
+
+    function normToHudPixel(normX, normY) {
+      let scaleX = 1;
+      let scaleY = 1;
+      if (camera.aspect > videoAspect) {
+        scaleY = camera.aspect / videoAspect;
+      } else {
+        scaleX = videoAspect / camera.aspect;
+      }
+      const mirroredX = 1.0 - normX;
+      const sx = ((mirroredX - 0.5) * scaleX + 0.5) * hudCanvas.width;
+      const sy = ((normY - 0.5) * scaleY + 0.5) * hudCanvas.height;
+      return { x: sx, y: sy };
+    }
+
+    function renderHandHud(elapsed) {
+      hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+
+      if (!state.cameraActive || !state.handTrackingEnabled || !state.handDetected || !state.latestLandmarks) {
+        return;
+      }
+
+      const lm = state.latestLandmarks;
+      const pts = lm.map((p) => normToHudPixel(p.x, p.y));
+
+      hudCtx.save();
+
+      // 1. Minimalist geometric skeleton filaments
+      hudCtx.lineWidth = 1.25;
+      hudCtx.strokeStyle = state.isPinching
+        ? 'rgba(232, 121, 249, 0.45)'
+        : 'rgba(103, 232, 249, 0.35)';
+
+      hudCtx.beginPath();
+      for (let i = 0; i < HAND_CONNECTIONS.length; i++) {
+        const [a, b] = HAND_CONNECTIONS[i];
+        hudCtx.moveTo(pts[a].x, pts[a].y);
+        hudCtx.lineTo(pts[b].x, pts[b].y);
+      }
+      hudCtx.stroke();
+
+      // 2. Subtle luminous joint vertices
+      for (let i = 0; i < pts.length; i++) {
+        const isTip = (i === 4 || i === 8 || i === 12 || i === 16 || i === 20);
+        const r = isTip ? 3.2 : 2.0;
+
+        hudCtx.beginPath();
+        hudCtx.arc(pts[i].x, pts[i].y, r, 0, Math.PI * 2);
+        hudCtx.fillStyle = isTip
+          ? (state.isPinching ? 'rgba(240, 171, 252, 0.85)' : 'rgba(165, 243, 252, 0.78)')
+          : 'rgba(255, 255, 255, 0.42)';
+        hudCtx.fill();
+      }
+
+      // 3. Geometric reticle ring around palm / pinch anchor
+      const anchor = state.isPinching
+        ? { x: (pts[4].x + pts[8].x) * 0.5, y: (pts[4].y + pts[8].y) * 0.5 }
+        : pts[9];
+
+      const ringRadius = state.isPinching
+        ? 18 + Math.sin(elapsed * 8) * 2
+        : 28 + Math.sin(elapsed * 3) * 2;
+
+      hudCtx.beginPath();
+      hudCtx.arc(anchor.x, anchor.y, ringRadius, 0, Math.PI * 2);
+      hudCtx.lineWidth = state.isPinching ? 2.0 : 1.2;
+      hudCtx.strokeStyle = state.isPinching
+        ? 'rgba(232, 121, 249, 0.85)'
+        : 'rgba(56, 189, 248, 0.45)';
+      hudCtx.stroke();
+
+      // Inner diamond geometric accent when pinched
+      if (state.isPinching) {
+        hudCtx.save();
+        hudCtx.translate(anchor.x, anchor.y);
+        hudCtx.rotate(elapsed * 1.8);
+        hudCtx.strokeStyle = 'rgba(103, 232, 249, 0.85)';
+        hudCtx.lineWidth = 1.2;
+        hudCtx.strokeRect(-7, -7, 14, 14);
+        hudCtx.restore();
+      }
+
+      hudCtx.restore();
+    }
+
+    // -------------------------------------------------------------------------
+    // 11. UI CONTROLS & PRESET WIRING
+    // -------------------------------------------------------------------------
+    const shapeButtons = document.querySelectorAll('.shape-btn');
+    shapeButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setHeroShape(btn.dataset.shape);
+        shapeButtons.forEach((b) => b.classList.toggle('active', b === btn));
+      });
+    });
+
+    const atmoButtons = document.querySelectorAll('.atmo-btn');
+    const sliderIor = document.getElementById('slider-ior');
+    const valIor = document.getElementById('val-ior');
+    const sliderFrost = document.getElementById('slider-frost');
+    const valFrost = document.getElementById('val-frost');
+
+    function setAtmosphere(key) {
+      const cfg = ATMOSPHERES[key];
+      if (!cfg) return;
+      state.atmoKey = key;
+      state.particleMode = cfg.particleMode;
+
+      state.targetTintColor.setHex(cfg.tintHex);
+      state.targetFogColor.setHex(cfg.fogHex);
+      state.targetFogDensity = cfg.fogDensity;
+      state.targetKeyColor.setHex(cfg.keyHex);
+      state.targetRimCyan.setHex(cfg.rimCyanHex);
+      state.targetRimWarm.setHex(cfg.rimWarmHex);
+      state.targetRimViolet.setHex(cfg.rimVioletHex);
+      state.targetWireColor.setHex(cfg.wireHex);
+      state.targetWireOpacity = cfg.wireOpacity;
+      state.targetParticleColor.setHex(cfg.particleHex);
+      state.targetParticleOpacity = cfg.particleOpacity;
+      state.targetParticleSpeed = cfg.particleSpeed;
+
+      state.targetIor = cfg.defaultIor;
+      state.targetFrost = cfg.defaultFrost;
+      sliderIor.value = cfg.defaultIor;
+      valIor.textContent = cfg.defaultIor.toFixed(2);
+      sliderFrost.value = cfg.defaultFrost;
+      valFrost.textContent = cfg.defaultFrost.toFixed(2);
+
+      atmoButtons.forEach((b) => b.classList.toggle('active', b.dataset.atmo === key));
+    }
+
+    atmoButtons.forEach((btn) => {
+      btn.addEventListener('click', () => setAtmosphere(btn.dataset.atmo));
+    });
+
+    sliderIor.addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      state.targetIor = v;
+      valIor.textContent = v.toFixed(2);
+    });
+
+    sliderFrost.addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      state.targetFrost = v;
+      valFrost.textContent = v.toFixed(2);
+    });
+
+    document.getElementById('btn-recenter').addEventListener('click', () => {
+      state.prismTargetPos.set(0, 0.15, 0);
+      state.prismTargetScale = 1.0;
+      state.rotVel.set(0.25, 0.55);
+    });
+
+    const bottomDock = document.getElementById('bottom-dock');
+    document.getElementById('btn-toggle-dock').addEventListener('click', () => {
+      bottomDock.classList.toggle('dock-hidden');
+    });
+
+    // -------------------------------------------------------------------------
+    // 12. RESPONSIVE RESIZE HANDLER
+    // -------------------------------------------------------------------------
+    function onResize() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      camera.aspect = w / h;
+      camera.position.z = w < 640 ? 10.4 : 8.8;
+      camera.updateProjectionMatrix();
+
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(dpr);
+
+      hudCanvas.width = w * dpr;
+      hudCanvas.height = h * dpr;
+
+      fitMirrorPlane();
+    }
+    window.addEventListener('resize', onResize, { passive: true });
+    onResize();
+
+    // -------------------------------------------------------------------------
+    // 13. MAIN 60FPS ANIMATION LOOP
+    // -------------------------------------------------------------------------
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const elapsed = clock.getElapsedTime();
+      const smooth = 1 - Math.exp(-dt * 5.0);
+
+      // 1. Run MediaPipe Hand Tracking if active
+      processHandVision(performance.now());
+
+      // 2. Update procedural mirror field when webcam is off
+      if (!state.cameraActive) {
+        updateProceduralMirror(elapsed);
+      }
+
+      // 3. Smoothly interpolate optical material & atmosphere colors
+      state.ior += (state.targetIor - state.ior) * smooth;
+      state.frost += (state.targetFrost - state.frost) * smooth;
+      heroGlassMaterial.ior = state.ior;
+      heroGlassMaterial.roughness = state.frost;
+      shardMaterial.ior = state.ior;
+      shardMaterial.roughness = Math.min(0.45, state.frost + 0.04);
+
+      state.tintColor.lerp(state.targetTintColor, smooth);
+      state.fogColor.lerp(state.targetFogColor, smooth);
+      state.fogDensity += (state.targetFogDensity - state.fogDensity) * smooth;
+      mirrorMat.color.copy(state.tintColor);
+      scene.fog.color.copy(state.fogColor);
+      scene.fog.density = state.fogDensity;
+
+      state.keyColor.lerp(state.targetKeyColor, smooth);
+      state.rimCyan.lerp(state.targetRimCyan, smooth);
+      state.rimWarm.lerp(state.targetRimWarm, smooth);
+      state.rimViolet.lerp(state.targetRimViolet, smooth);
+      keyLight.color.copy(state.keyColor);
+
+      // Boost cyan/violet rim glow dynamically when pinched or grabbed
+      const targetGlow = (state.isPinching || state.isMouseDragging) ? 1.0 : (state.isHovered ? 0.45 : 0.0);
+      state.grabGlow += (targetGlow - state.grabGlow) * (1 - Math.exp(-dt * 8.0));
+
+      cyanRimLight.color.copy(state.rimCyan);
+      cyanRimLight.intensity = 3.2 + state.grabGlow * 2.6;
+      warmRimLight.color.copy(state.rimWarm);
+      violetRimLight.color.copy(state.rimViolet);
+      violetRimLight.intensity = 2.6 + state.grabGlow * 2.8;
+
+      state.wireColor.lerp(state.targetWireColor, smooth);
+      state.wireOpacity += (state.targetWireOpacity - state.wireOpacity) * smooth;
+      heroWireMaterial.color.copy(state.wireColor);
+      heroWireMaterial.opacity = state.wireOpacity + state.grabGlow * 0.28;
+
+      state.particleColor.lerp(state.targetParticleColor, smooth);
+      state.particleOpacity += (state.targetParticleOpacity - state.particleOpacity) * smooth;
+      state.particleSpeed += (state.targetParticleSpeed - state.particleSpeed) * smooth;
+      particleMat.color.copy(state.particleColor);
+      particleMat.opacity = state.particleOpacity;
+
+      // 4. Spring-damped 3D translation & rotational inertia for Hero Glass Prism
+      // Tighter spring lock when pinched or mouse-dragged; silkier float when gliding
+      const springK = (state.isPinching || state.isMouseDragging) ? 16.0 : 9.0;
+      const springAlpha = 1 - Math.exp(-dt * springK);
+
+      // Gentle ambient levitation bob when idle
+      const idleBobY = (!state.isMouseDragging && !state.handDetected)
+        ? Math.sin(elapsed * 1.3) * 0.12
+        : 0;
+
+      state.prismPos.x += (state.prismTargetPos.x - state.prismPos.x) * springAlpha;
+      state.prismPos.y += ((state.prismTargetPos.y + idleBobY) - state.prismPos.y) * springAlpha;
+      state.prismPos.z += (state.prismTargetPos.z - state.prismPos.z) * springAlpha;
+
+      heroGroup.position.copy(state.prismPos);
+
+      // Subtle scale breathing + pinch feedback
+      const pinchScaleBoost = state.isPinching ? 1.06 : (state.isHovered ? 1.03 : 1.0);
+      const breathe = 1.0 + Math.sin(elapsed * 1.8) * 0.025;
+      state.prismScale += (state.prismTargetScale * pinchScaleBoost - state.prismScale) * smooth;
+      heroGroup.scale.setScalar(state.prismScale * breathe);
+
+      // Rotational momentum with gentle damping back to ambient spin
+      const baseSpinY = 0.28;
+      const baseSpinX = Math.sin(elapsed * 0.5) * 0.12;
+      state.rotVel.y += (baseSpinY - state.rotVel.y) * (1 - Math.exp(-dt * 2.2));
+      state.rotVel.x += (baseSpinX - state.rotVel.x) * (1 - Math.exp(-dt * 2.2));
+
+      heroGroup.rotation.y += state.rotVel.y * dt;
+      heroGroup.rotation.x += state.rotVel.x * dt;
+
+      // Keep dispersion rim lights loosely tracking the prism for vivid edge caustics
+      cyanRimLight.position.x = -3.8 + state.prismPos.x * 0.6;
+      cyanRimLight.position.y = 2.2 + state.prismPos.y * 0.6;
+      warmRimLight.position.x = 3.8 + state.prismPos.x * 0.6;
+      warmRimLight.position.y = -2.0 + state.prismPos.y * 0.6;
+
+      // 5. Orbiting companion glass shards follow hero prism softly
+      for (let i = 0; i < shards.length; i++) {
+        const { group, spec } = shards[i];
+        const angle = elapsed * spec.speed + spec.phase;
+        const targetX = state.prismPos.x * 0.65 + Math.cos(angle) * spec.radius;
+        const targetY = state.prismPos.y * 0.65 + Math.sin(angle * 1.3) * spec.yAmp;
+        const targetZ = Math.sin(angle) * 0.9 - 0.4;
+
+        group.position.x += (targetX - group.position.x) * (1 - Math.exp(-dt * 3.0));
+        group.position.y += (targetY - group.position.y) * (1 - Math.exp(-dt * 3.0));
+        group.position.z += (targetZ - group.position.z) * (1 - Math.exp(-dt * 3.0));
+
+        group.rotation.x = elapsed * 0.45 + i;
+        group.rotation.y = elapsed * 0.55 - i;
+      }
+
+      // 6. Update 3D atmospheric weather particles
+      const posAttr = particleGeo.attributes.position;
+      const arr = posAttr.array;
+      const isRain = (state.particleMode === 'drizzle' || state.particleMode === 'storm');
+      const windTilt = (state.particleMode === 'storm' ? 0.36 : 0.12) + state.prismPos.x * 0.04;
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const p = pData[i];
+        const idx = i * 6;
+
+        if (isRain) {
+          const stepY = state.particleSpeed * p.speed * dt;
+          p.y -= stepY;
+          p.x += windTilt * stepY;
+
+          if (p.y < -P_BOUNDS.y) {
+            p.y = P_BOUNDS.y;
+            p.x = (Math.random() - 0.5) * P_BOUNDS.x * 2;
+          }
+          if (p.x > P_BOUNDS.x) p.x -= P_BOUNDS.x * 2;
+          if (p.x < -P_BOUNDS.x) p.x += P_BOUNDS.x * 2;
+
+          const streakLen = (state.particleMode === 'storm' ? 0.65 : 0.32) * p.speed;
+          arr[idx] = p.x;
+          arr[idx + 1] = p.y;
+          arr[idx + 2] = p.z;
+          arr[idx + 3] = p.x - windTilt * streakLen;
+          arr[idx + 4] = p.y + streakLen;
+          arr[idx + 5] = p.z;
+        } else {
+          p.y += 0.45 * p.speed * dt;
+          p.x += Math.sin(elapsed * 0.8 + p.phase) * 0.25 * dt;
+
+          if (p.y > P_BOUNDS.y) {
+            p.y = -P_BOUNDS.y;
+            p.x = (Math.random() - 0.5) * P_BOUNDS.x * 2;
+          }
+
+          arr[idx] = p.x;
+          arr[idx + 1] = p.y;
+          arr[idx + 2] = p.z;
+          arr[idx + 3] = p.x;
+          arr[idx + 4] = p.y + 0.045;
+          arr[idx + 5] = p.z;
+        }
+      }
+      posAttr.needsUpdate = true;
+
+      // 7. Render WebGL 3D Scene + 2D Hand Skeleton HUD
+      renderer.render(scene, camera);
+      renderHandHud(elapsed);
+    }
+
+    window.addEventListener('load', () => {
+      animate();
+    });
+  </script>
+</body>
+</html>
